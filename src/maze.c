@@ -15,45 +15,45 @@ enum direction {
     DOWN  = 8
 };
 
-const char *walls[] = {
-    [0] = " ",
-
-    [                   RIGHT] = "\u2576",
-    [              UP        ] = "\u2575",
-    [              UP | RIGHT] = "\u2514",
-    [       LEFT             ] = "\u2574",
-    [       LEFT      | RIGHT] = "\u2500",
-    [       LEFT | UP        ] = "\u2518",
-    [       LEFT | UP | RIGHT] = "\u2534",
-    [DOWN                    ] = "\u2577",
-    [DOWN             | RIGHT] = "\u250c",
-    [DOWN        | UP        ] = "\u2502",
-    [DOWN        | UP | RIGHT] = "\u251c",
-    [DOWN | LEFT             ] = "\u2510",
-    [DOWN | LEFT      | RIGHT] = "\u252c",
-    [DOWN | LEFT | UP        ] = "\u2524",
-    [DOWN | LEFT | UP | RIGHT] = "\u253c"
-};
-
 /* const char *walls[] = { */
 /*     [0] = " ", */
 
 /*     [                   RIGHT] = "\u2576", */
 /*     [              UP        ] = "\u2575", */
-/*     [              UP | RIGHT] = "\u2570", */
+/*     [              UP | RIGHT] = "\u2514", */
 /*     [       LEFT             ] = "\u2574", */
 /*     [       LEFT      | RIGHT] = "\u2500", */
-/*     [       LEFT | UP        ] = "\u256f", */
+/*     [       LEFT | UP        ] = "\u2518", */
 /*     [       LEFT | UP | RIGHT] = "\u2534", */
 /*     [DOWN                    ] = "\u2577", */
-/*     [DOWN             | RIGHT] = "\u256d", */
+/*     [DOWN             | RIGHT] = "\u250c", */
 /*     [DOWN        | UP        ] = "\u2502", */
 /*     [DOWN        | UP | RIGHT] = "\u251c", */
-/*     [DOWN | LEFT             ] = "\u256e", */
+/*     [DOWN | LEFT             ] = "\u2510", */
 /*     [DOWN | LEFT      | RIGHT] = "\u252c", */
 /*     [DOWN | LEFT | UP        ] = "\u2524", */
 /*     [DOWN | LEFT | UP | RIGHT] = "\u253c" */
 /* }; */
+
+const char *walls[] = {
+    [0] = " ",
+
+    [                   RIGHT] = "\u2576",
+    [              UP        ] = "\u2575",
+    [              UP | RIGHT] = "\u2570",
+    [       LEFT             ] = "\u2574",
+    [       LEFT      | RIGHT] = "\u2500",
+    [       LEFT | UP        ] = "\u256f",
+    [       LEFT | UP | RIGHT] = "\u2534",
+    [DOWN                    ] = "\u2577",
+    [DOWN             | RIGHT] = "\u256d",
+    [DOWN        | UP        ] = "\u2502",
+    [DOWN        | UP | RIGHT] = "\u251c",
+    [DOWN | LEFT             ] = "\u256e",
+    [DOWN | LEFT      | RIGHT] = "\u252c",
+    [DOWN | LEFT | UP        ] = "\u2524",
+    [DOWN | LEFT | UP | RIGHT] = "\u253c"
+};
 
 /* const char *walls[] = { */
 /*     [0] = " ", */
@@ -74,8 +74,6 @@ const char *walls[] = {
 /*     [DOWN | LEFT | UP        ] = "+", */
 /*     [DOWN | LEFT | UP | RIGHT] = "+" */
 /* }; */
-
-
 
 static const char *intersection(const Maze *maze,
                                 size_t col, size_t row) {
@@ -159,11 +157,13 @@ struct vec {
 
 
 static struct vec unitvec[] = {
-    { 0, (size_t)-1 },
-    { (size_t)-1, 0 },
-    { 0, 1 },
-    { 1, 0 }
+    { 0, (size_t)-1 },  // Up
+    { (size_t)-1, 0 },  // Left
+    { 0, 1 },           // Down
+    { 1, 0 }            // Right
 };
+
+#define DIR_NEGATE(dir) ((dir) ^ 2)
 
 static inline bool randpath_is_valid(const Maze *maze,
                                      struct vec x0,
@@ -201,11 +201,141 @@ static inline size_t randpath_select(size_t *open,
     return (size_t)-1;
 }
 
-static bool maze_randpath(bool (*visited)[MAZE_HEIGHT][MAZE_WIDTH],
-                          Maze *maze, struct vec x0, struct vec xf) {
-    if (x0.x == xf.x && x0.y == xf.y) return true;
-    if ((*visited)[x0.y][x0.x]) return false;
-    (*visited)[x0.y][x0.x] = true;
+
+/* states:
+ * unset = 0,
+ * visited = 2,
+ * path(dir) = 1 + (dir << 1),
+ * nopath = 4,
+ * target = 6
+ * bfs_visited = 8
+ */
+
+#define RP_VISITEDP(entry) ((entry) == 2)
+#define RP_VISITED 2
+
+#define RP_PATHP(entry) ((_Bool)((entry) & 1))
+#define RP_PATH(dir) ((unsigned char)(((dir) << 1) + 1))
+#define RP_DIR(entry) ((entry) >> 1)
+
+#define RP_NOPATHP(entry) ((entry) == 4)
+#define RP_NOPATH 4
+
+#define RP_TARGETP(entry) ((entry) == 6)
+#define RP_TARGET 6
+
+#define RP_BFS_VISITEDP(entry) ((entry) == 8)
+#define RP_BFS_VISITED 8
+
+#define RP_UNSETP(entry) ((entry) == 0)
+/* Can be assumed to equal 0 */
+#define RP_UNSET 0
+
+typedef unsigned char RPCache[MAZE_HEIGHT][MAZE_WIDTH];
+
+static void randpath_cache_update(RPCache *cache, struct vec start) {
+    if (!RP_UNSETP((*cache)[start.y][start.x])) return;
+    (*cache)[start.y][start.x] = RP_BFS_VISITED;
+
+    struct vec visited[MAZE_WIDTH * MAZE_HEIGHT] = { [0] = start };
+    size_t visited_count = 1;
+    size_t next_visit = 0;
+    struct vec found;
+    bool has_found = false;
+
+    while (!has_found && next_visit < visited_count) {
+        struct vec pos = visited[next_visit++];
+
+        for (size_t dir = 0; dir < 4; ++dir) {
+            struct vec dx = unitvec[dir];
+            if ((dx.x == (size_t)-1 && pos.x == 0)
+                || pos.x + dx.x >= MAZE_WIDTH
+                || (dx.y == (size_t)-1 && pos.y == 0)
+                || pos.y + dx.y >= MAZE_HEIGHT) continue;
+
+            struct vec adj = { .x = pos.x + dx.x,
+                               .y = pos.y + dx.y  };
+
+            unsigned char *adj_entry = &(*cache)[adj.y][adj.x];
+
+            if (RP_NOPATHP(*adj_entry)
+                || RP_PATHP(*adj_entry)
+                || RP_TARGETP(*adj_entry)) {
+                found = adj;
+                has_found = true;
+                break;
+            }
+
+            if (!RP_UNSETP(*adj_entry)) continue;
+
+            *adj_entry = RP_BFS_VISITED;
+            visited[visited_count++] = adj;
+        }
+    }
+
+    unsigned char found_entry = (*cache)[found.y][found.x];
+    bool path = has_found
+        && (RP_PATHP(found_entry) || RP_TARGETP(found_entry));
+
+    visited[0] = has_found ? found : start;
+    visited_count = 1;
+    next_visit = 0;
+
+    if (!has_found) (*cache)[start.y][start.x] = RP_NOPATH;
+
+    while (next_visit < visited_count) {
+        struct vec pos = visited[next_visit++];
+
+        for (size_t dir = 0; dir < 4; ++dir) {
+            struct vec dx = unitvec[dir];
+            if ((dx.x == (size_t)-1 && pos.x == 0)
+                || pos.x + dx.x >= MAZE_WIDTH
+                || (dx.y == (size_t)-1 && pos.y == 0)
+                || pos.y + dx.y >= MAZE_HEIGHT) continue;
+
+            struct vec adj = { .x = pos.x + dx.x,
+                               .y = pos.y + dx.y  };
+
+            unsigned char *adj_entry = &(*cache)[adj.y][adj.x];
+
+            if (!RP_BFS_VISITEDP(*adj_entry)) continue;
+
+            *adj_entry = path ? RP_PATH(DIR_NEGATE(dir)) : RP_NOPATH;
+            visited[visited_count++] = adj;
+        }
+    }
+}
+
+static void randpath_cache_invalidate_path(RPCache *cache,
+                                           struct vec pos) {
+    unsigned char *start_entry = &(*cache)[pos.y][pos.x];
+    if (!RP_PATHP(*start_entry)) return;
+    *start_entry = RP_UNSET;
+
+    for (size_t i = 0; i < 4; ++i) {
+        struct vec dx = unitvec[i];
+        if ((dx.x == (size_t)-1 && pos.x == 0)
+            || pos.x + dx.x >= MAZE_WIDTH
+            || (dx.y == (size_t)-1 && pos.y == 0)
+            || pos.y + dx.y >= MAZE_HEIGHT) continue;
+
+        struct vec adj_pos = { .x = pos.x + dx.x,
+                               .y = pos.y + dx.y  };
+
+        unsigned char adj_entry = (*cache)[adj_pos.y][adj_pos.x];
+
+        if (!RP_PATHP(adj_entry) ||
+            RP_DIR(adj_entry) != DIR_NEGATE(i)) continue;
+
+        randpath_cache_invalidate_path(cache, adj_pos);
+    }
+}
+
+static bool maze_randpath(RPCache *cache, Maze *maze, struct vec x0) {
+    if (RP_TARGETP((*cache)[x0.y][x0.x])) return true;
+    if (RP_VISITEDP((*cache)[x0.y][x0.x])) return false;
+    randpath_cache_invalidate_path(cache, x0);
+    (*cache)[x0.y][x0.x] = RP_VISITED;
 
     size_t opendirs[4];
     size_t num_open = 0;
@@ -224,6 +354,11 @@ static bool maze_randpath(bool (*visited)[MAZE_HEIGHT][MAZE_WIDTH],
         struct vec dirvec = unitvec[diridx];
         struct vec next = { .x = x0.x + dirvec.x,
                             .y = x0.y + dirvec.y  };
+
+        randpath_cache_update(cache, next);
+        if (RP_NOPATHP((*cache)[next.y][next.x])) {
+            continue;
+        }
 
         bool horiz = diridx & 1;
         bool dir = (diridx >> 1) & 1;
@@ -255,8 +390,8 @@ static bool maze_randpath(bool (*visited)[MAZE_HEIGHT][MAZE_WIDTH],
         *walla = true;
         *wallb = true;
 
-        if (maze_randpath(visited, maze, next, xf)) {
-            (*visited)[x0.y][x0.x] = false;
+        if (maze_randpath(cache, maze, next)) {
+            (*cache)[x0.y][x0.x] = false;
             return true;
         }
 
@@ -266,7 +401,8 @@ static bool maze_randpath(bool (*visited)[MAZE_HEIGHT][MAZE_WIDTH],
         *wallb = wallb0;
     }
 
-    (*visited)[x0.y][x0.x] = false;
+    (*cache)[x0.y][x0.x] = RP_UNSET;
+    randpath_cache_update(cache, x0);
     return false;
 }
 
@@ -287,10 +423,11 @@ void maze_randomize(Maze *maze) {
     maze->vert[0][1] = true;
     maze->horiz[1][0] = true;
 
-    bool visited[MAZE_HEIGHT][MAZE_WIDTH] = { [0][0] = false };
-    maze_randpath(&visited, maze,
-                  (struct vec){ 0, 0 },
-                  (struct vec){ MAZE_WIDTH - 1, MAZE_HEIGHT - 1 });
+    RPCache cache = {
+        [MAZE_HEIGHT - 1][MAZE_WIDTH - 1] = RP_TARGET
+    };
+
+    maze_randpath(&cache, maze, (struct vec){ 0, 0 });
 
     maze->vert[MAZE_HEIGHT - 1][MAZE_WIDTH] = false;
 }

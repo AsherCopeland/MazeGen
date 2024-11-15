@@ -125,7 +125,9 @@ int main(int argc, char **argv) {
 
         srand((unsigned int)seed);
     } else {
-        srand((unsigned int)time(NULL));
+        unsigned int seed = (unsigned int)time(NULL);
+        srand(seed);
+        fprintf(stderr, "Seed: %u\n", seed);
     }
 
     Maze maze = MAZE_INIT;
