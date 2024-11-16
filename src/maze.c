@@ -427,65 +427,55 @@ static bool maze_randpath(RPCache *cache, Maze *maze, struct vec x0) {
         bool dir = (diridx >> 1) & 1;
 
         bool *entry;
-        bool *forward;
-        bool *walla;
-        bool *wallb;
 
         if (horiz) {
             entry = &maze->vert[x0.y][x0.x + dir];
-            forward = &maze->vert[x0.y][next.x + dir];
-            walla = &maze->horiz[x0.y][next.x];
-            wallb = &maze->horiz[x0.y + 1][next.x];
         } else {
             entry = &maze->horiz[x0.y + dir][x0.x];
-            forward = &maze->horiz[next.y + dir][x0.x];
-            walla = &maze->vert[next.y][x0.x];
-            wallb = &maze->vert[next.y][x0.x + 1];
         }
 
-        bool entry0 = *entry;
-        bool forward0 = *forward;
-        bool walla0 = *walla;
-        bool wallb0 = *wallb;
-
         *entry = false;
-        *forward = true;
-        *walla = true;
-        *wallb = true;
 
         if (maze_randpath(cache, maze, next)) {
+            (*cache)[x0.y][x0.x] = RP_UNSET;
+            randpath_cache_invalidate_nopath(cache, x0);
             (*cache)[x0.y][x0.x] = RP_TARGET;
             return true;
         }
 
-        *entry = entry0;
-        *forward = forward0;
-        *walla = walla0;
-        *wallb = wallb0;
+        *entry = true;
     }
 
     (*cache)[x0.y][x0.x] = RP_UNSET;
-    randpath_cache_invalidate_nopath(cache, x0);    maze_print_rp(cache, maze);
-
+    randpath_cache_invalidate_nopath(cache, x0);
     return false;
+}
+
+static void shuffle_coords(struct vec *coords, unsigned int count) {
+    for (unsigned int i = count - 1; i > 0; --i) {
+        unsigned int idx = (unsigned int)rand() % i;
+
+        struct vec tmp = coords[i];
+        coords[i] = coords[idx];
+        coords[idx] = tmp;
+    }
 }
 
 void maze_randomize(Maze *maze) {
     for (size_t i = 0; i < MAZE_HEIGHT; ++i) {
         for (size_t j = 0; j < MAZE_WIDTH + 1; ++j) {
-            maze->vert[i][j] = j == 0 || j == MAZE_WIDTH;
+            maze->vert[i][j] = true;
         }
     }
 
     for (size_t i = 0; i < MAZE_HEIGHT + 1; ++i) {
         for (size_t j = 0; j < MAZE_WIDTH; ++j) {
-            maze->horiz[i][j] = i == 0 || i == MAZE_HEIGHT;
+            maze->horiz[i][j] = true;
         }
     }
 
     maze->vert[0][0] = false;
-    maze->vert[0][1] = true;
-    maze->horiz[1][0] = true;
+    maze->vert[MAZE_HEIGHT - 1][MAZE_WIDTH] = false;
 
     RPCache cache = {
         [MAZE_HEIGHT - 1][MAZE_WIDTH - 1] = RP_TARGET
@@ -493,5 +483,18 @@ void maze_randomize(Maze *maze) {
 
     maze_randpath(&cache, maze, (struct vec){ 0, 0 });
 
-    maze->vert[MAZE_HEIGHT - 1][MAZE_WIDTH] = false;
+    struct vec coords[MAZE_WIDTH * MAZE_HEIGHT] = { [0].x = 0 };
+    size_t num_coords = 0;
+
+    for (size_t row = 0; row < MAZE_HEIGHT; ++row) {
+        for (size_t col = 0; col < MAZE_WIDTH; ++col) {
+            coords[num_coords++] = (struct vec){ col, row };
+        }
+    }
+
+    shuffle_coords(coords, MAZE_WIDTH * MAZE_HEIGHT);
+
+    for (size_t i = 0; i < MAZE_WIDTH * MAZE_HEIGHT; ++i) {
+        maze_randpath(&cache, maze, coords[i]);
+    }
 }

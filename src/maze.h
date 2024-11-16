@@ -1,8 +1,8 @@
 #ifndef MAZE_H
 #define MAZE_H
 
-#define MAZE_WIDTH 15
-#define MAZE_HEIGHT 10
+#define MAZE_WIDTH 30
+#define MAZE_HEIGHT 20
 
 
 typedef struct {
