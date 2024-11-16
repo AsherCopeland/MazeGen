@@ -75,6 +75,20 @@ const char *walls[] = {
 /*     [DOWN | LEFT | UP | RIGHT] = "+" */
 /* }; */
 
+// Helpful macros only exist later in the file
+static char rp_cache_chars[] = {
+    [0] = ' ',
+    [1] = '^',
+    [3] = '<',
+    [5] = 'v',
+    [7] = '>',
+
+    [2] = 'V',
+    [4] = '.',
+    [6] = '*',
+    [8] = 'B'
+};
+
 static const char *intersection(const Maze *maze,
                                 size_t col, size_t row) {
     int direction = 0;
@@ -97,14 +111,35 @@ static const char *intersection(const Maze *maze,
     return walls[direction];
 }
 
-static void print_row(const Maze *maze, size_t row) {
+typedef unsigned char RPCache[MAZE_HEIGHT][MAZE_WIDTH];
+
+// Printing with randpath cache is used for debugging purposes
+static void print_row(RPCache *rp_cache,
+                      const Maze *maze, size_t row) {
 #if CELL_HEIGHT > 0
     for (size_t i = 0; i < CELL_HEIGHT; ++i) {
         for (size_t col = 0; col < MAZE_WIDTH; ++col) {
             printf("%s", walls[maze->vert[row][col] ? DOWN | UP : 0]);
 
 #if CELL_WIDTH > 0
-            for (size_t j = 0; j < CELL_WIDTH; ++j) {
+            unsigned char cache_entry = 0;
+            if (rp_cache) cache_entry = (*rp_cache)[row][col];
+
+            size_t spaces_left = CELL_WIDTH - 1;
+            char cache_char = rp_cache_chars[cache_entry];
+
+            if (cache_char) {
+                printf("%c", cache_char);
+            } else {
+                if (CELL_WIDTH > 1) {
+                    printf("%.2X", cache_entry);
+                    --spaces_left;
+                } else {
+                    printf("?");
+                }
+            }
+
+            for (size_t j = 0; j < spaces_left; ++j) {
                 printf("%s", walls[0]);
             }
 #endif
@@ -118,7 +153,7 @@ static void print_row(const Maze *maze, size_t row) {
 #endif
 }
 
-void maze_print(const Maze *maze) {
+static void maze_print_rp(RPCache *rp_cache, const Maze *maze) {
     for (size_t i = 0; i < MAZE_WIDTH; ++i) {
         printf("%s", intersection(maze, i, 0));
 
@@ -133,7 +168,7 @@ void maze_print(const Maze *maze) {
 
 
     for (size_t row = 0; row < MAZE_HEIGHT; ++row) {
-        print_row(maze, row);
+        print_row(rp_cache, maze, row);
 
         for (size_t col = 0; col < MAZE_WIDTH; ++col) {
             printf("%s", intersection(maze, col, row + 1));
@@ -148,6 +183,10 @@ void maze_print(const Maze *maze) {
 
         printf("%s\n", intersection(maze, MAZE_WIDTH, row + 1));
     }
+}
+
+void maze_print(const Maze *maze) {
+    maze_print_rp(NULL, maze);
 }
 
 struct vec {
@@ -231,7 +270,6 @@ static inline size_t randpath_select(size_t *open,
 /* Can be assumed to equal 0 */
 #define RP_UNSET 0
 
-typedef unsigned char RPCache[MAZE_HEIGHT][MAZE_WIDTH];
 
 static void randpath_cache_update(RPCache *cache, struct vec start) {
     if (!RP_UNSETP((*cache)[start.y][start.x])) return;
@@ -331,6 +369,31 @@ static void randpath_cache_invalidate_path(RPCache *cache,
     }
 }
 
+static void randpath_cache_invalidate_nopath(RPCache *cache,
+                                             struct vec pos) {
+    unsigned char *start_entry = &(*cache)[pos.y][pos.x];
+    if (!RP_NOPATHP(*start_entry) && !RP_UNSETP(*start_entry)) return;
+    *start_entry = RP_UNSET;
+
+    for (size_t i = 0; i < 4; ++i) {
+        struct vec dx = unitvec[i];
+        if ((dx.x == (size_t)-1 && pos.x == 0)
+            || pos.x + dx.x >= MAZE_WIDTH
+            || (dx.y == (size_t)-1 && pos.y == 0)
+            || pos.y + dx.y >= MAZE_HEIGHT) continue;
+
+        struct vec adj_pos = { .x = pos.x + dx.x,
+                               .y = pos.y + dx.y  };
+
+        unsigned char adj_entry = (*cache)[adj_pos.y][adj_pos.x];
+
+        if (!RP_NOPATHP(adj_entry)) continue;
+
+        randpath_cache_invalidate_nopath(cache, adj_pos);
+    }
+}
+
+
 static bool maze_randpath(RPCache *cache, Maze *maze, struct vec x0) {
     if (RP_TARGETP((*cache)[x0.y][x0.x])) return true;
     if (RP_VISITEDP((*cache)[x0.y][x0.x])) return false;
@@ -391,7 +454,7 @@ static bool maze_randpath(RPCache *cache, Maze *maze, struct vec x0) {
         *wallb = true;
 
         if (maze_randpath(cache, maze, next)) {
-            (*cache)[x0.y][x0.x] = false;
+            (*cache)[x0.y][x0.x] = RP_TARGET;
             return true;
         }
 
@@ -402,7 +465,8 @@ static bool maze_randpath(RPCache *cache, Maze *maze, struct vec x0) {
     }
 
     (*cache)[x0.y][x0.x] = RP_UNSET;
-    randpath_cache_update(cache, x0);
+    randpath_cache_invalidate_nopath(cache, x0);    maze_print_rp(cache, maze);
+
     return false;
 }
 
