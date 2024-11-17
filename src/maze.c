@@ -311,7 +311,7 @@ static void randpath_cache_update(RPCache *cache, struct vec start) {
         }
     }
 
-    unsigned char found_entry = (*cache)[found.y][found.x];
+    unsigned char found_entry = has_found && (*cache)[found.y][found.x];
     bool path = has_found
         && (RP_PATHP(found_entry) || RP_TARGETP(found_entry));
 
